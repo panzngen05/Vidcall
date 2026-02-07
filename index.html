@@ -1,23 +1,25 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Panz Love Call ❤️</title>
+  <title>Video Call Room</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { background:#111; color:white; text-align:center; font-family:sans-serif; }
     video { width:45%; border-radius:15px; margin:5px; background:black; }
     input,button { padding:10px; border-radius:10px; border:none; margin:5px; }
     button { background:pink; font-weight:bold; }
+    .danger { background:red; color:white; }
   </style>
 </head>
 <body>
 
-<h2>Panz Video Call ❤️</h2>
+<h2>Video Call Room</h2>
 
 <input id="roomInput" placeholder="Masukkan Room Code">
 <br>
 <button onclick="createRoom()">Create Room</button>
 <button onclick="joinRoom()">Join Room</button>
+<button class="danger" onclick="deleteRoom()">Delete Room</button>
 
 <br><br>
 <video id="localVideo" autoplay muted playsinline></video>
@@ -141,6 +143,20 @@ async function joinRoom() {
   await applyPendingIce();
 
   alert("Berhasil join!");
+}
+
+async function deleteRoom() {
+  const room = document.getElementById("roomInput").value.trim();
+  if (!room) return alert("Isi room dulu!");
+
+  if (!confirm("Yakin mau hapus room?")) return;
+
+  await db.ref("rooms/" + room).remove();
+
+  if (pc) pc.close();
+  remoteVideo.srcObject = null;
+
+  alert("Room berhasil dihapus!");
 }
 </script>
 
