@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <title>Random Voice Call</title>
 <style>
-body {
+body{
   background:#111;
   color:white;
   text-align:center;
   font-family:sans-serif;
   padding:30px;
 }
-button {
+button{
   padding:12px;
   border-radius:8px;
   border:none;
@@ -19,7 +19,7 @@ button {
   color:white;
   font-size:16px;
 }
-#status { margin-top:15px; }
+#status{margin-top:15px;}
 </style>
 </head>
 <body>
@@ -27,14 +27,15 @@ button {
 <h2>Random Voice Call Firebase</h2>
 <button onclick="searchPartner()">SEARCH PARTNER</button>
 <p id="status">Idle</p>
+
 <audio id="remoteAudio" autoplay></audio>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, get, remove, push, onValue } 
+import { getDatabase, ref, set, get, remove, push, onValue }
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-/* FIREBASE CONFIG KAMU */
+/* FIREBASE CONFIG */
 const firebaseConfig = {
   apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
   authDomain: "vidcall-c5202.firebaseapp.com",
@@ -52,29 +53,35 @@ let pc = new RTCPeerConnection({
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 });
 
-let callId;
+let callId = null;
 let userId = Math.random().toString(36).substring(2,9);
-let localStream;
+let localStream = null;
 
 const statusText = document.getElementById("status");
 const remoteAudio = document.getElementById("remoteAudio");
 
+/* MIC */
 async function initMic(){
   localStream = await navigator.mediaDevices.getUserMedia({audio:true});
-  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+  localStream.getTracks().forEach(track=>{
+    pc.addTrack(track, localStream);
+  });
 }
 
-pc.ontrack = e => {
+/* TERIMA AUDIO */
+pc.ontrack = e=>{
   remoteAudio.srcObject = e.streams[0];
 };
 
-pc.onicecandidate = e => {
-  if(e.candidate){
+/* ICE CANDIDATE */
+pc.onicecandidate = e=>{
+  if(e.candidate && callId){
     push(ref(db,`calls/${callId}/ice`), e.candidate.toJSON());
   }
 };
 
-async function searchPartner(){
+/* ===== SEARCH PARTNER ===== */
+window.searchPartner = async function(){
   statusText.innerText = "Searching Partner...";
   await initMic();
 
@@ -90,8 +97,9 @@ async function searchPartner(){
     await remove(ref(db,"queue/"+other));
     createOffer();
   }
-}
+};
 
+/* ===== NUNGGU ORANG ===== */
 function waitMatch(){
   statusText.innerText = "Waiting someone...";
   onValue(ref(db,"calls"), snap=>{
@@ -102,6 +110,7 @@ function waitMatch(){
   });
 }
 
+/* ===== BUAT OFFER ===== */
 async function createOffer(){
   statusText.innerText = "Connecting...";
   const offer = await pc.createOffer();
@@ -111,24 +120,27 @@ async function createOffer(){
   onValue(ref(db,`calls/${callId}/answer`), async s=>{
     if(s.val()){
       await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
-      statusText.innerText="Connected 🎤";
+      statusText.innerText = "Connected 🎤";
     }
   });
 }
 
+/* ===== JOIN CALL ===== */
 async function joinCall(){
   statusText.innerText = "Joining...";
   onValue(ref(db,`calls/${callId}/offer`), async s=>{
     if(!s.val()) return;
+
     await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
 
     const ans = await pc.createAnswer();
     await pc.setLocalDescription(ans);
     await set(ref(db,`calls/${callId}/answer`), ans);
 
-    statusText.innerText="Connected 🎤";
+    statusText.innerText = "Connected 🎤";
   });
 }
+
 </script>
 
 </body>
