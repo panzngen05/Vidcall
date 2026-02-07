@@ -27,12 +27,11 @@ button{
 <h2>Random Voice Call Firebase</h2>
 <button onclick="searchPartner()">SEARCH PARTNER</button>
 <p id="status">Idle</p>
-
 <audio id="remoteAudio" autoplay></audio>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, get, remove, push, onValue }
+import { getDatabase, ref, set, get, remove, push, onValue, off }
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 /* FIREBASE CONFIG */
@@ -60,7 +59,7 @@ let localStream = null;
 const statusText = document.getElementById("status");
 const remoteAudio = document.getElementById("remoteAudio");
 
-/* MIC */
+/* INIT MIC */
 async function initMic(){
   localStream = await navigator.mediaDevices.getUserMedia({audio:true});
   localStream.getTracks().forEach(track=>{
@@ -80,9 +79,13 @@ pc.onicecandidate = e=>{
   }
 };
 
+pc.onconnectionstatechange = ()=>{
+  console.log("STATE:", pc.connectionState);
+};
+
 /* ===== SEARCH PARTNER ===== */
 window.searchPartner = async function(){
-  statusText.innerText = "Searching Partner...";
+  statusText.innerText = "Searching...";
   await initMic();
 
   const queueRef = ref(db,"queue");
@@ -99,13 +102,16 @@ window.searchPartner = async function(){
   }
 };
 
-/* ===== NUNGGU ORANG ===== */
+/* ===== NUNGGU MATCH ===== */
 function waitMatch(){
-  statusText.innerText = "Waiting someone...";
-  onValue(ref(db,"calls"), snap=>{
+  statusText.innerText = "Waiting partner...";
+
+  const callsRef = ref(db,"calls");
+  onValue(callsRef, snap=>{
     if(!snap.exists()) return;
     const data = snap.val();
     callId = Object.keys(data)[0];
+    off(callsRef); // stop listener
     joinCall();
   });
 }
@@ -113,35 +119,51 @@ function waitMatch(){
 /* ===== BUAT OFFER ===== */
 async function createOffer(){
   statusText.innerText = "Connecting...";
+
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+
   await set(ref(db,`calls/${callId}/offer`), offer);
 
-  onValue(ref(db,`calls/${callId}/answer`), async s=>{
-    if(s.val()){
-      await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
-      statusText.innerText = "Connected 🎤";
-    }
+  const ansRef = ref(db,`calls/${callId}/answer`);
+  const answerSnap = await new Promise(resolve=>{
+    const unsub = onValue(ansRef, s=>{
+      if(s.exists()){
+        resolve(s);
+        off(ansRef);
+      }
+    });
   });
+
+  const answer = answerSnap.val();
+  if(pc.signalingState === "have-local-offer"){
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+  }
+
+  statusText.innerText = "Connected 🎤";
 }
 
 /* ===== JOIN CALL ===== */
 async function joinCall(){
   statusText.innerText = "Joining...";
-  onValue(ref(db,`calls/${callId}/offer`), async s=>{
-    if(!s.val()) return;
 
-    await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
+  const offerSnap = await get(ref(db,`calls/${callId}/offer`));
+  if(!offerSnap.exists()) return;
 
-    const ans = await pc.createAnswer();
-    await pc.setLocalDescription(ans);
-    await set(ref(db,`calls/${callId}/answer`), ans);
+  const offer = offerSnap.val();
 
-    statusText.innerText = "Connected 🎤";
-  });
+  if(pc.signalingState !== "stable") return;
+
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  await set(ref(db,`calls/${callId}/answer`), answer);
+
+  statusText.innerText = "Connected 🎤";
 }
 
 </script>
-
 </body>
 </html>
