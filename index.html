@@ -42,12 +42,14 @@ const db = firebase.database();
 
 let pc = null;
 let localStream = null;
+let pendingCandidates = [];
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
 function createPeer(room) {
   if (pc) pc.close();
+  pendingCandidates = [];
 
   pc = new RTCPeerConnection({
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -66,9 +68,21 @@ function createPeer(room) {
   db.ref("rooms/" + room + "/ice").off();
   db.ref("rooms/" + room + "/ice").on("child_added", snap => {
     if (!snap.exists()) return;
-    const candidate = JSON.parse(snap.val());
-    pc.addIceCandidate(candidate);
+    const candidate = new RTCIceCandidate(JSON.parse(snap.val()));
+
+    if (pc.remoteDescription) {
+      pc.addIceCandidate(candidate);
+    } else {
+      pendingCandidates.push(candidate);
+    }
   });
+}
+
+async function applyPendingIce() {
+  for (let c of pendingCandidates) {
+    try { await pc.addIceCandidate(c); } catch(e){}
+  }
+  pendingCandidates = [];
 }
 
 async function initCam() {
@@ -99,6 +113,7 @@ async function createRoom() {
     if (snap.exists() && !pc.currentRemoteDescription) {
       const ans = JSON.parse(snap.val());
       await pc.setRemoteDescription(ans);
+      await applyPendingIce();
     }
   });
 
@@ -123,6 +138,7 @@ async function joinRoom() {
   await pc.setLocalDescription(answer);
 
   await db.ref("rooms/" + room + "/answer").set(JSON.stringify(answer));
+  await applyPendingIce();
 
   alert("Berhasil join!");
 }
