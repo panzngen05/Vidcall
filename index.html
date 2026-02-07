@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Panz Love Call ❤️</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      background:#111;
+      color:white;
+      text-align:center;
+      font-family:sans-serif;
+    }
+    video {
+      width:45%;
+      border-radius:15px;
+      margin:5px;
+      background:black;
+    }
+    input,button {
+      padding:10px;
+      border-radius:10px;
+      border:none;
+      margin:5px;
+    }
+    button {
+      background:pink;
+      font-weight:bold;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Panz Video Call ❤️</h2>
+
+<input id="roomInput" placeholder="Masukkan Room Code">
+<br>
+<button onclick="createRoom()">Create Room</button>
+<button onclick="joinRoom()">Join Room</button>
+
+<br><br>
+<video id="localVideo" autoplay muted playsinline></video>
+<video id="remoteVideo" autoplay playsinline></video>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
+  authDomain: "vidcall-c5202.firebaseapp.com",
+  databaseURL: "https://vidcall-c5202-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "vidcall-c5202",
+  storageBucket: "vidcall-c5202.firebasestorage.app",
+  messagingSenderId: "1088851390418",
+  appId: "1:1088851390418:web:cb2a3214ff94435f82e20b"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let pc = new RTCPeerConnection({
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+});
+
+let localStream;
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+
+pc.ontrack = e => {
+  remoteVideo.srcObject = e.streams[0];
+};
+
+pc.onicecandidate = e => {
+  if (e.candidate) {
+    const room = document.getElementById("roomInput").value;
+    db.ref("rooms/" + room + "/ice").push(JSON.stringify(e.candidate));
+  }
+};
+
+async function initCam() {
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  localVideo.srcObject = localStream;
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+}
+
+async function createRoom() {
+  const room = document.getElementById("roomInput").value;
+  if (!room) return alert("Isi room dulu!");
+
+  await initCam();
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  db.ref("rooms/" + room + "/offer").set(JSON.stringify(offer));
+
+  db.ref("rooms/" + room + "/answer").on("value", async snap => {
+    if (snap.exists()) {
+      const ans = JSON.parse(snap.val());
+      await pc.setRemoteDescription(ans);
+    }
+  });
+
+  db.ref("rooms/" + room + "/ice").on("child_added", snap => {
+    const candidate = JSON.parse(snap.val());
+    pc.addIceCandidate(candidate);
+  });
+
+  alert("Room dibuat! Share kodenya 😄");
+}
+
+async function joinRoom() {
+  const room = document.getElementById("roomInput").value;
+  if (!room) return alert("Isi room dulu!");
+
+  await initCam();
+
+  const offerSnap = await db.ref("rooms/" + room + "/offer").once("value");
+  if (!offerSnap.exists()) return alert("Room tidak ditemukan!");
+
+  const offer = JSON.parse(offerSnap.val());
+  await pc.setRemoteDescription(offer);
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  db.ref("rooms/" + room + "/answer").set(JSON.stringify(answer));
+
+  db.ref("rooms/" + room + "/ice").on("child_added", snap => {
+    const candidate = JSON.parse(snap.val());
+    pc.addIceCandidate(candidate);
+  });
+
+  alert("Berhasil join!");
+}
+</script>
+
+</body>
+</html>
