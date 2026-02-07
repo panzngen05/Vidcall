@@ -1,38 +1,40 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Panz Love Call ❤️</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { background:#111; color:white; text-align:center; font-family:sans-serif; }
-    video { width:45%; border-radius:15px; margin:5px; background:black; }
-    input,button { padding:10px; border-radius:10px; border:none; margin:5px; }
-    button { background:pink; font-weight:bold; }
-    .danger { background:red; color:white; }
-  </style>
+<meta charset="UTF-8">
+<title>Random Voice Call</title>
+<style>
+body {
+  background:#111;
+  color:white;
+  text-align:center;
+  font-family:sans-serif;
+  padding:30px;
+}
+button {
+  padding:12px;
+  border-radius:8px;
+  border:none;
+  background:#00c3ff;
+  color:white;
+  font-size:16px;
+}
+#status { margin-top:15px; }
+</style>
 </head>
 <body>
 
-<h2>Panz Video Call ❤️</h2>
+<h2>Random Voice Call Firebase</h2>
+<button onclick="searchPartner()">SEARCH PARTNER</button>
+<p id="status">Idle</p>
+<audio id="remoteAudio" autoplay></audio>
 
-<input id="roomInput" placeholder="Masukkan Room Code">
-<br>
-<button onclick="createRoom()">Create Room</button>
-<button onclick="joinRoom()">Join Room</button>
-<button class="danger" onclick="deleteRoom()">Delete Room</button>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getDatabase, ref, set, get, remove, push, onValue } 
+from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-<br><br>
-<video id="localVideo" autoplay muted playsinline></video>
-<video id="remoteVideo" autoplay playsinline></video>
-
-<br>
-<button onclick="switchCamera()">Switch Camera</button>
-<button onclick="toggleCamera()">Camera On/Off</button>
-
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
-
-<script>
+/* FIREBASE CONFIG KAMU */
 const firebaseConfig = {
   apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
   authDomain: "vidcall-c5202.firebaseapp.com",
@@ -43,159 +45,89 @@ const firebaseConfig = {
   appId: "1:1088851390418:web:cb2a3214ff94435f82e20b"
 };
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-let pc = null;
-let localStream = null;
-let pendingCandidates = [];
-let currentFacing = "user";
+let pc = new RTCPeerConnection({
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+});
 
-const localVideo = document.getElementById("localVideo");
-const remoteVideo = document.getElementById("remoteVideo");
+let callId;
+let userId = Math.random().toString(36).substring(2,9);
+let localStream;
 
-function createPeer(room) {
-  if (pc) pc.close();
-  pendingCandidates = [];
+const statusText = document.getElementById("status");
+const remoteAudio = document.getElementById("remoteAudio");
 
-  pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
-
-  pc.ontrack = e => {
-    remoteVideo.srcObject = e.streams[0];
-  };
-
-  pc.onicecandidate = e => {
-    if (e.candidate) {
-      db.ref("rooms/" + room + "/ice").push(JSON.stringify(e.candidate));
-    }
-  };
-
-  db.ref("rooms/" + room + "/ice").off();
-  db.ref("rooms/" + room + "/ice").on("child_added", snap => {
-    if (!snap.exists()) return;
-    const candidate = new RTCIceCandidate(JSON.parse(snap.val()));
-
-    if (pc.remoteDescription) {
-      pc.addIceCandidate(candidate);
-    } else {
-      pendingCandidates.push(candidate);
-    }
-  });
+async function initMic(){
+  localStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
 }
 
-async function applyPendingIce() {
-  for (let c of pendingCandidates) {
-    try { await pc.addIceCandidate(c); } catch(e){}
+pc.ontrack = e => {
+  remoteAudio.srcObject = e.streams[0];
+};
+
+pc.onicecandidate = e => {
+  if(e.candidate){
+    push(ref(db,`calls/${callId}/ice`), e.candidate.toJSON());
   }
-  pendingCandidates = [];
-}
+};
 
-async function initCam() {
-  if (localStream) return;
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: currentFacing },
-    audio: true
-  });
-  localVideo.srcObject = localStream;
-}
+async function searchPartner(){
+  statusText.innerText = "Searching Partner...";
+  await initMic();
 
-function addTracks() {
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-}
+  const queueRef = ref(db,"queue");
+  const snap = await get(queueRef);
 
-async function switchCamera() {
-  if (!localStream) return alert("Aktifkan kamera dulu!");
-
-  currentFacing = currentFacing === "user" ? "environment" : "user";
-
-  localStream.getTracks().forEach(track => track.stop());
-
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: currentFacing },
-    audio: true
-  });
-
-  localVideo.srcObject = localStream;
-
-  if (pc) {
-    const videoTrack = localStream.getVideoTracks()[0];
-    const sender = pc.getSenders().find(s => s.track && s.track.kind === "video");
-    if (sender) sender.replaceTrack(videoTrack);
+  if(!snap.exists()){
+    await set(ref(db,"queue/"+userId), true);
+    waitMatch();
+  } else {
+    const other = Object.keys(snap.val())[0];
+    callId = push(ref(db,"calls")).key;
+    await remove(ref(db,"queue/"+other));
+    createOffer();
   }
 }
 
-function toggleCamera() {
-  if (!localStream) return alert("Aktifkan kamera dulu!");
-
-  const videoTrack = localStream.getVideoTracks()[0];
-  if (!videoTrack) return;
-
-  videoTrack.enabled = !videoTrack.enabled;
-  alert(videoTrack.enabled ? "Kamera ON" : "Kamera OFF (Voice Call)");
+function waitMatch(){
+  statusText.innerText = "Waiting someone...";
+  onValue(ref(db,"calls"), snap=>{
+    if(!snap.exists()) return;
+    const data = snap.val();
+    callId = Object.keys(data)[0];
+    joinCall();
+  });
 }
 
-async function createRoom() {
-  const room = document.getElementById("roomInput").value.trim();
-  if (!room) return alert("Isi room dulu!");
-
-  await initCam();
-  createPeer(room);
-  addTracks();
-
+async function createOffer(){
+  statusText.innerText = "Connecting...";
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  await set(ref(db,`calls/${callId}/offer`), offer);
 
-  await db.ref("rooms/" + room + "/offer").set(JSON.stringify(offer));
-
-  db.ref("rooms/" + room + "/answer").off();
-  db.ref("rooms/" + room + "/answer").on("value", async snap => {
-    if (snap.exists() && !pc.currentRemoteDescription) {
-      const ans = JSON.parse(snap.val());
-      await pc.setRemoteDescription(ans);
-      await applyPendingIce();
+  onValue(ref(db,`calls/${callId}/answer`), async s=>{
+    if(s.val()){
+      await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
+      statusText.innerText="Connected 🎤";
     }
   });
-
-  alert("Room dibuat!");
 }
 
-async function joinRoom() {
-  const room = document.getElementById("roomInput").value.trim();
-  if (!room) return alert("Isi room dulu!");
+async function joinCall(){
+  statusText.innerText = "Joining...";
+  onValue(ref(db,`calls/${callId}/offer`), async s=>{
+    if(!s.val()) return;
+    await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
 
-  await initCam();
-  createPeer(room);
-  addTracks();
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    await set(ref(db,`calls/${callId}/answer`), ans);
 
-  const offerSnap = await db.ref("rooms/" + room + "/offer").once("value");
-  if (!offerSnap.exists()) return alert("Room tidak ditemukan!");
-
-  const offer = JSON.parse(offerSnap.val());
-  await pc.setRemoteDescription(offer);
-
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-
-  await db.ref("rooms/" + room + "/answer").set(JSON.stringify(answer));
-  await applyPendingIce();
-
-  alert("Berhasil join!");
-}
-
-async function deleteRoom() {
-  const room = document.getElementById("roomInput").value.trim();
-  if (!room) return alert("Isi room dulu!");
-
-  if (!confirm("Yakin mau hapus room?")) return;
-
-  await db.ref("rooms/" + room).remove();
-
-  if (pc) pc.close();
-  remoteVideo.srcObject = null;
-
-  alert("Room dihapus!");
+    statusText.innerText="Connected 🎤";
+  });
 }
 </script>
 
