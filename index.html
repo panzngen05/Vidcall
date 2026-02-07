@@ -2,39 +2,44 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Random Voice Call</title>
+<title>Panz Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body{
-  background:#111;
-  color:white;
-  text-align:center;
-  font-family:sans-serif;
-  padding:30px;
-}
-button{
-  padding:12px;
-  border-radius:8px;
-  border:none;
-  background:#00c3ff;
-  color:white;
-  font-size:16px;
-}
+body{font-family:sans-serif;background:#0f172a;color:white;margin:0}
+#login,#chat{padding:15px}
+input,button{padding:10px;border:none;border-radius:8px}
+button{background:#22c55e;color:white}
+#messages{height:60vh;overflow:auto;background:#020617;padding:10px;border-radius:10px}
+.msg{margin:5px 0;padding:8px;background:#1e293b;border-radius:8px}
+img{max-width:150px;border-radius:10px}
 </style>
 </head>
 <body>
 
-<h2>Random Voice Call Firebase</h2>
-<button onclick="searchPartner()">SEARCH PARTNER</button>
-<p id="status">Idle</p>
-<audio id="remoteAudio" autoplay></audio>
+<div id="login">
+<h2>Panz Chat Login</h2>
+<input id="name" placeholder="Nama kamu"><br><br>
+<button onclick="login()">Masuk</button>
+</div>
+
+<div id="chat" style="display:none">
+<h3>Global Room</h3>
+<div id="messages"></div><br>
+<input id="text" placeholder="Ketik pesan">
+<input type="file" id="file">
+<button onclick="send()">Kirim</button>
+</div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, get, remove, push, onValue, off }
-from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } 
+from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } 
+from "https://www.gstatic.com/firebasejs/9.23.0/firebase-storage.js";
 
+/* FIREBASE CONFIG KAMU */
 const firebaseConfig = {
-  apiKey: "AIzaSy...",
+  apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
   authDomain: "vidcall-c5202.firebaseapp.com",
   databaseURL: "https://vidcall-c5202-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "vidcall-c5202",
@@ -44,108 +49,60 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
 
-let pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+let username = "";
+
+window.login = function(){
+  const n = document.getElementById("name").value;
+  if(!n) return alert("Isi nama dulu");
+  username = n;
+  document.getElementById("login").style.display="none";
+  document.getElementById("chat").style.display="block";
+}
+
+/* LISTEN REALTIME MESSAGE */
+const q = query(collection(db,"messages"), orderBy("time"));
+onSnapshot(q,(snap)=>{
+  const box = document.getElementById("messages");
+  box.innerHTML="";
+  snap.forEach(doc=>{
+    const d = doc.data();
+    box.innerHTML += `
+      <div class="msg">
+        <b>${d.user}</b><br>
+        ${d.text||""}
+        ${d.img?`<br><img src="${d.img}">`:""}
+      </div>`;
+  });
+  box.scrollTop = box.scrollHeight;
 });
 
-let callId=null;
-let userId=Math.random().toString(36).substring(2,9);
-let answered=false;
+/* SEND MESSAGE */
+window.send = async function(){
+  const text = document.getElementById("text").value;
+  const file = document.getElementById("file").files[0];
+  let imgUrl = "";
 
-const statusText=document.getElementById("status");
-const remoteAudio=document.getElementById("remoteAudio");
-
-/* MIC */
-async function initMic(){
- const stream=await navigator.mediaDevices.getUserMedia({audio:true});
- stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-}
-
-pc.ontrack=e=>{
- remoteAudio.srcObject=e.streams[0];
-};
-
-/* SEARCH */
-window.searchPartner=async function(){
- answered=false;
- statusText.innerText="Searching...";
- await initMic();
-
- const snap=await get(ref(db,"queue"));
-
- if(!snap.exists()){
-   await set(ref(db,"queue/"+userId),true);
-   waitMatch();
- }else{
-   const other=Object.keys(snap.val())[0];
-   callId=push(ref(db,"calls")).key;
-   await remove(ref(db,"queue/"+other));
-   createOffer();
- }
-};
-
-/* WAIT */
-function waitMatch(){
- statusText.innerText="Waiting...";
- const r=ref(db,"calls");
-
- onValue(r,snap=>{
-  if(!snap.exists())return;
-  callId=Object.keys(snap.val())[0];
-  off(r);
-  joinCall();
- });
-}
-
-/* OFFER */
-async function createOffer(){
- statusText.innerText="Connecting...";
-
- const offer=await pc.createOffer();
- await pc.setLocalDescription(offer);
- await set(ref(db,"calls/"+callId+"/offer"),offer);
-
- const ansRef=ref(db,"calls/"+callId+"/answer");
-
- onValue(ansRef,async s=>{
-  if(!s.exists())return;
-  off(ansRef);
-
-  if(pc.signalingState==="have-local-offer"){
-    await pc.setRemoteDescription(
-      new RTCSessionDescription(s.val())
-    );
-    statusText.innerText="Connected 🎤";
+  if(file){
+    const storageRef = ref(storage,"chat/"+Date.now());
+    await uploadBytes(storageRef,file);
+    imgUrl = await getDownloadURL(storageRef);
   }
- });
-}
 
-/* JOIN */
-async function joinCall(){
- if(answered) return; // <<< KUNCI FIX
- answered=true;
+  if(!text && !imgUrl) return;
 
- statusText.innerText="Joining...";
+  await addDoc(collection(db,"messages"),{
+    user: username,
+    text: text,
+    img: imgUrl,
+    time: serverTimestamp()
+  });
 
- const offerSnap=await get(ref(db,"calls/"+callId+"/offer"));
- if(!offerSnap.exists()) return;
-
- if(pc.signalingState!=="stable") return;
-
- await pc.setRemoteDescription(
-   new RTCSessionDescription(offerSnap.val())
- );
-
- const ans=await pc.createAnswer();
- await pc.setLocalDescription(ans);
-
- await set(ref(db,"calls/"+callId+"/answer"),ans);
-
- statusText.innerText="Connected 🎤";
+  document.getElementById("text").value="";
+  document.getElementById("file").value="";
 }
 </script>
-
 </body>
 </html>
