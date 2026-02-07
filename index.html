@@ -51,7 +51,7 @@ import { getFirestore, doc, setDoc, getDoc, updateDoc,
 collection, addDoc, onSnapshot, query, orderBy, serverTimestamp }
 from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
-/* CONFIG FIREBASE FULL */
+/* FIREBASE CONFIG */
 const firebaseConfig = {
   apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
   authDomain: "vidcall-c5202.firebaseapp.com",
@@ -70,6 +70,21 @@ let currentRoom="global";
 let privateTarget="";
 let unsub=null;
 
+/* AUTO LOGIN */
+window.addEventListener("load", async ()=>{
+  const savedUser = localStorage.getItem("panz_user");
+  if(savedUser){
+    meUser = savedUser;
+    auth.style.display="none";
+    app.style.display="block";
+    me.innerText="Login sebagai: "+meUser;
+
+    await updateDoc(doc(db,"users",meUser),{online:true});
+    loadUsers();
+    listenGlobal();
+  }
+});
+
 /* REGISTER / LOGIN */
 window.authUser = async ()=>{
   const u=username.value;
@@ -87,14 +102,17 @@ window.authUser = async ()=>{
   }
 
   meUser=u;
+  localStorage.setItem("panz_user", meUser);
+
   auth.style.display="none";
   app.style.display="block";
   me.innerText="Login sebagai: "+u;
+
   loadUsers();
   listenGlobal();
 }
 
-/* USERS LIST REALTIME */
+/* USERS LIST */
 function loadUsers(){
   onSnapshot(collection(db,"users"),snap=>{
     users.innerHTML="";
@@ -126,10 +144,9 @@ function listenGlobal(){
     msgs.scrollTop=msgs.scrollHeight;
   });
 }
-
 window.setGlobal=listenGlobal;
 
-/* PRIVATE ROOM */
+/* PRIVATE CHAT */
 window.openPrivate=(u)=>{
   privateTarget=u;
   currentRoom="private";
@@ -177,6 +194,7 @@ window.logout=async()=>{
     online:false,
     lastSeen:Date.now()
   });
+  localStorage.removeItem("panz_user");
   location.reload();
 }
 </script>
