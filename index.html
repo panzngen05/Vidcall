@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Video Call Room</title>
+  <title>Panz Love Call ❤️</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { background:#111; color:white; text-align:center; font-family:sans-serif; }
@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<h2>Video Call Room</h2>
+<h2>Panz Video Call ❤️</h2>
 
 <input id="roomInput" placeholder="Masukkan Room Code">
 <br>
@@ -24,6 +24,10 @@
 <br><br>
 <video id="localVideo" autoplay muted playsinline></video>
 <video id="remoteVideo" autoplay playsinline></video>
+
+<br>
+<button onclick="switchCamera()">Switch Camera</button>
+<button onclick="toggleCamera()">Camera On/Off</button>
 
 <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -45,6 +49,7 @@ const db = firebase.database();
 let pc = null;
 let localStream = null;
 let pendingCandidates = [];
+let currentFacing = "user";
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
@@ -89,12 +94,46 @@ async function applyPendingIce() {
 
 async function initCam() {
   if (localStream) return;
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: currentFacing },
+    audio: true
+  });
   localVideo.srcObject = localStream;
 }
 
 function addTracks() {
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+}
+
+async function switchCamera() {
+  if (!localStream) return alert("Aktifkan kamera dulu!");
+
+  currentFacing = currentFacing === "user" ? "environment" : "user";
+
+  localStream.getTracks().forEach(track => track.stop());
+
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: currentFacing },
+    audio: true
+  });
+
+  localVideo.srcObject = localStream;
+
+  if (pc) {
+    const videoTrack = localStream.getVideoTracks()[0];
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+    if (sender) sender.replaceTrack(videoTrack);
+  }
+}
+
+function toggleCamera() {
+  if (!localStream) return alert("Aktifkan kamera dulu!");
+
+  const videoTrack = localStream.getVideoTracks()[0];
+  if (!videoTrack) return;
+
+  videoTrack.enabled = !videoTrack.enabled;
+  alert(videoTrack.enabled ? "Kamera ON" : "Kamera OFF (Voice Call)");
 }
 
 async function createRoom() {
@@ -119,7 +158,7 @@ async function createRoom() {
     }
   });
 
-  alert("Room dibuat! Share kodenya 😄");
+  alert("Room dibuat!");
 }
 
 async function joinRoom() {
@@ -156,7 +195,7 @@ async function deleteRoom() {
   if (pc) pc.close();
   remoteVideo.srcObject = null;
 
-  alert("Room berhasil dihapus!");
+  alert("Room dihapus!");
 }
 </script>
 
