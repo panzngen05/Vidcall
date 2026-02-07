@@ -19,7 +19,6 @@ button{
   color:white;
   font-size:16px;
 }
-#status{margin-top:15px;}
 </style>
 </head>
 <body>
@@ -34,9 +33,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebas
 import { getDatabase, ref, set, get, remove, push, onValue, off }
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-/* FIREBASE CONFIG */
 const firebaseConfig = {
-  apiKey: "AIzaSyCF6VsawNScXC8vQuqqFtVK9dqnwIiN5Us",
+  apiKey: "AIzaSy...",
   authDomain: "vidcall-c5202.firebaseapp.com",
   databaseURL: "https://vidcall-c5202-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "vidcall-c5202",
@@ -52,118 +50,102 @@ let pc = new RTCPeerConnection({
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 });
 
-let callId = null;
-let userId = Math.random().toString(36).substring(2,9);
-let localStream = null;
+let callId=null;
+let userId=Math.random().toString(36).substring(2,9);
+let answered=false;
 
-const statusText = document.getElementById("status");
-const remoteAudio = document.getElementById("remoteAudio");
+const statusText=document.getElementById("status");
+const remoteAudio=document.getElementById("remoteAudio");
 
-/* INIT MIC */
+/* MIC */
 async function initMic(){
-  localStream = await navigator.mediaDevices.getUserMedia({audio:true});
-  localStream.getTracks().forEach(track=>{
-    pc.addTrack(track, localStream);
-  });
+ const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+ stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 }
 
-/* TERIMA AUDIO */
-pc.ontrack = e=>{
-  remoteAudio.srcObject = e.streams[0];
+pc.ontrack=e=>{
+ remoteAudio.srcObject=e.streams[0];
 };
 
-/* ICE CANDIDATE */
-pc.onicecandidate = e=>{
-  if(e.candidate && callId){
-    push(ref(db,`calls/${callId}/ice`), e.candidate.toJSON());
-  }
+/* SEARCH */
+window.searchPartner=async function(){
+ answered=false;
+ statusText.innerText="Searching...";
+ await initMic();
+
+ const snap=await get(ref(db,"queue"));
+
+ if(!snap.exists()){
+   await set(ref(db,"queue/"+userId),true);
+   waitMatch();
+ }else{
+   const other=Object.keys(snap.val())[0];
+   callId=push(ref(db,"calls")).key;
+   await remove(ref(db,"queue/"+other));
+   createOffer();
+ }
 };
 
-pc.onconnectionstatechange = ()=>{
-  console.log("STATE:", pc.connectionState);
-};
-
-/* ===== SEARCH PARTNER ===== */
-window.searchPartner = async function(){
-  statusText.innerText = "Searching...";
-  await initMic();
-
-  const queueRef = ref(db,"queue");
-  const snap = await get(queueRef);
-
-  if(!snap.exists()){
-    await set(ref(db,"queue/"+userId), true);
-    waitMatch();
-  } else {
-    const other = Object.keys(snap.val())[0];
-    callId = push(ref(db,"calls")).key;
-    await remove(ref(db,"queue/"+other));
-    createOffer();
-  }
-};
-
-/* ===== NUNGGU MATCH ===== */
+/* WAIT */
 function waitMatch(){
-  statusText.innerText = "Waiting partner...";
+ statusText.innerText="Waiting...";
+ const r=ref(db,"calls");
 
-  const callsRef = ref(db,"calls");
-  onValue(callsRef, snap=>{
-    if(!snap.exists()) return;
-    const data = snap.val();
-    callId = Object.keys(data)[0];
-    off(callsRef); // stop listener
-    joinCall();
-  });
+ onValue(r,snap=>{
+  if(!snap.exists())return;
+  callId=Object.keys(snap.val())[0];
+  off(r);
+  joinCall();
+ });
 }
 
-/* ===== BUAT OFFER ===== */
+/* OFFER */
 async function createOffer(){
-  statusText.innerText = "Connecting...";
+ statusText.innerText="Connecting...";
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+ const offer=await pc.createOffer();
+ await pc.setLocalDescription(offer);
+ await set(ref(db,"calls/"+callId+"/offer"),offer);
 
-  await set(ref(db,`calls/${callId}/offer`), offer);
+ const ansRef=ref(db,"calls/"+callId+"/answer");
 
-  const ansRef = ref(db,`calls/${callId}/answer`);
-  const answerSnap = await new Promise(resolve=>{
-    const unsub = onValue(ansRef, s=>{
-      if(s.exists()){
-        resolve(s);
-        off(ansRef);
-      }
-    });
-  });
+ onValue(ansRef,async s=>{
+  if(!s.exists())return;
+  off(ansRef);
 
-  const answer = answerSnap.val();
-  if(pc.signalingState === "have-local-offer"){
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+  if(pc.signalingState==="have-local-offer"){
+    await pc.setRemoteDescription(
+      new RTCSessionDescription(s.val())
+    );
+    statusText.innerText="Connected 🎤";
   }
-
-  statusText.innerText = "Connected 🎤";
+ });
 }
 
-/* ===== JOIN CALL ===== */
+/* JOIN */
 async function joinCall(){
-  statusText.innerText = "Joining...";
+ if(answered) return; // <<< KUNCI FIX
+ answered=true;
 
-  const offerSnap = await get(ref(db,`calls/${callId}/offer`));
-  if(!offerSnap.exists()) return;
+ statusText.innerText="Joining...";
 
-  const offer = offerSnap.val();
+ const offerSnap=await get(ref(db,"calls/"+callId+"/offer"));
+ if(!offerSnap.exists()) return;
 
-  if(pc.signalingState !== "stable") return;
+ if(pc.signalingState!=="stable") return;
 
-  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+ await pc.setRemoteDescription(
+   new RTCSessionDescription(offerSnap.val())
+ );
 
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
+ const ans=await pc.createAnswer();
+ await pc.setLocalDescription(ans);
 
-  await set(ref(db,`calls/${callId}/answer`), answer);
+ await set(ref(db,"calls/"+callId+"/answer"),ans);
 
-  statusText.innerText = "Connected 🎤";
+ statusText.innerText="Connected 🎤";
 }
-
 </script>
+
 </body>
 </html>
