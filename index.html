@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dark Realtime Chat - Optimized</title>
+    <title>Dark Realtime Chat - Fixed</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -58,7 +58,6 @@
             width: 100%; padding: 14px; margin-top: 15px; 
             background: var(--primary-color); color: white; border: none; 
             border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; 
-            transition: opacity 0.2s;
         }
         .auth-box button:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -141,10 +140,10 @@
     <div id="auth-screen">
         <div class="auth-box">
             <h2 id="auth-title">Login Chat</h2>
-            <p id="conn-status" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Menyiapkan sistem...</p>
+            <p id="conn-status" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Menghubungkan...</p>
             <input type="text" id="username" placeholder="Username" autocomplete="off">
             <input type="password" id="password" placeholder="Password">
-            <button id="auth-btn">Masuk</button>
+            <button id="auth-btn" disabled>Tunggu Sebentar...</button>
             <p id="toggle-auth-text" style="margin-top:20px; cursor:pointer; text-decoration:underline; font-size:14px;">Buat akun baru</p>
         </div>
     </div>
@@ -193,7 +192,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
         import { 
             getFirestore, collection, doc, setDoc, getDoc, updateDoc, 
-            addDoc, query, orderBy, onSnapshot, serverTimestamp, enableIndexedDbPersistence
+            addDoc, query, orderBy, onSnapshot, serverTimestamp 
         } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -209,17 +208,6 @@
         const appId = "vidcall-responsive-v2"; 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-
-        // Mengaktifkan offline persistence untuk mempercepat loading data yang sudah ada
-        try {
-            enableIndexedDbPersistence(db).catch((err) => {
-                if (err.code == 'failed-precondition') {
-                    console.log("Persistence failed: multiple tabs open");
-                } else if (err.code == 'unimplemented') {
-                    console.log("Persistence is not available in this browser");
-                }
-            });
-        } catch(e) {}
 
         let currentUser = null;
         let currentRoomId = 'global';
@@ -237,21 +225,11 @@
         const sidebar = document.getElementById('sidebar');
         const overlay = document.getElementById('sidebar-overlay');
 
+        // Firestore Path Helpers
         const getColl = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
         const getDocRef = (name, id) => doc(db, 'artifacts', appId, 'public', 'data', name, id);
 
-        // Inisialisasi Auth State
-        const checkSavedSession = () => {
-            const saved = localStorage.getItem('chat_user_v2');
-            if (saved) {
-                loginUser(saved);
-            } else {
-                connStatus.innerText = "Sistem Online";
-                connStatus.style.color = "#10b981";
-                authBtn.disabled = false;
-            }
-        };
-
+        // --- functions registered to window for safety ---
         window.toggleSidebar = () => {
             sidebar.classList.toggle('active');
             overlay.classList.toggle('active');
@@ -279,8 +257,6 @@
                 if (isRegisterMode) {
                     if (userSnap.exists()) {
                         alert("Username sudah terpakai!");
-                        authBtn.disabled = false;
-                        authBtn.innerText = "Daftar";
                     } else {
                         await setDoc(userRef, { password, online: true, lastSeen: serverTimestamp() });
                         loginUser(username);
@@ -291,16 +267,14 @@
                         loginUser(username);
                     } else {
                         alert("Username atau Password salah!");
-                        authBtn.disabled = false;
-                        authBtn.innerText = "Masuk";
                     }
                 }
             } catch (e) { 
                 console.error(e);
-                alert("Koneksi lambat atau bermasalah."); 
-                authBtn.disabled = false;
-                authBtn.innerText = isRegisterMode ? "Daftar" : "Masuk";
+                alert("Gagal terhubung ke database!"); 
             }
+            authBtn.disabled = false;
+            authBtn.innerText = isRegisterMode ? "Daftar" : "Masuk";
         };
 
         function loginUser(username) {
@@ -324,7 +298,7 @@
         function listenUsers() {
             onSnapshot(getColl("users"), (snap) => {
                 const list = document.getElementById('user-list');
-                const fragment = document.createDocumentFragment(); // Gunakan fragment untuk performa render
+                list.innerHTML = '';
                 snap.forEach(d => {
                     if (d.id === currentUser) return;
                     const data = d.data();
@@ -337,11 +311,9 @@
                             <div class="user-name">${d.id}</div>
                             <div class="user-last-seen">${data.online ? 'Online' : 'Offline'}</div>
                         </div>`;
-                    fragment.appendChild(el);
+                    list.appendChild(el);
                 });
-                list.innerHTML = '';
-                list.appendChild(fragment);
-            }, (error) => console.error("User list error:", error));
+            });
         }
 
         window.selectRoom = (target) => {
@@ -358,8 +330,6 @@
             } else {
                 currentChatPartner = target;
                 currentRoomId = [currentUser, target].sort().join('___');
-                const partnerEl = document.querySelector(`.user-item[onclick*="${target}"]`);
-                if(partnerEl) partnerEl.classList.add('active');
                 document.getElementById('global-room-item').classList.remove('active');
                 document.getElementById('room-title').innerText = target;
                 document.getElementById('room-status').innerText = "Private Chat";
@@ -377,26 +347,22 @@
             const path = currentChatPartner ? `private_rooms/${currentRoomId}/messages` : `global_messages`;
             const q = query(getColl(path), orderBy("time", "asc"));
             
-            messagesContainer.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-secondary); font-size:12px;">Memuat pesan...</div>';
-
             unsubscribeMessages = onSnapshot(q, (snap) => {
                 messagesContainer.innerHTML = '';
-                const fragment = document.createDocumentFragment();
                 snap.forEach(d => {
                     const data = d.data();
                     const isMe = data.user === currentUser;
-                    const time = data.time ? new Date(data.time.seconds*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '...';
+                    const time = data.time ? new Date(data.time.seconds*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
                     const div = document.createElement('div');
                     div.className = `message ${isMe ? 'sent' : 'received'}`;
                     div.innerHTML = `
                         ${!isMe && !currentChatPartner ? `<span class="msg-sender-name">${data.user}</span>` : ''}
                         ${data.text}
                         <span class="msg-time">${time}</span>`;
-                    fragment.appendChild(div);
+                    messagesContainer.appendChild(div);
                 });
-                messagesContainer.appendChild(fragment);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, (err) => console.error("Msg error:", err));
+            });
         }
 
         window.sendMessage = async () => {
@@ -406,10 +372,7 @@
             const path = currentChatPartner ? `private_rooms/${currentRoomId}/messages` : `global_messages`;
             try {
                 await addDoc(getColl(path), { user: currentUser, text, time: serverTimestamp() });
-            } catch (e) { 
-                console.error(e);
-                alert("Gagal mengirim pesan.");
-            }
+            } catch (e) { console.error(e); }
         };
 
         // --- Event Listeners ---
@@ -422,8 +385,16 @@
         document.getElementById('send-btn').addEventListener('click', window.sendMessage);
         msgInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') window.sendMessage(); });
 
-        // Mulai aplikasi
-        checkSavedSession();
+        // --- Initial Load ---
+        const saved = localStorage.getItem('chat_user_v2');
+        if (saved) {
+            loginUser(saved);
+        } else {
+            connStatus.innerText = "Sistem Online";
+            connStatus.style.color = "#10b981";
+            authBtn.disabled = false;
+            authBtn.innerText = "Masuk";
+        }
     </script>
 </body>
 </html>
